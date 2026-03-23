@@ -57,7 +57,6 @@ public class AdminController {
 
         User savedManager = userRepository.save(manager);
 
-        // 2. Create the SACCO profile
         Sacco sacco = new Sacco();
         sacco.setName(request.getSaccoName());
         sacco.setRegistrationNumber(request.getRegistrationNumber());

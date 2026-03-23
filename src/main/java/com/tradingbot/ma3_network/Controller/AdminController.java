@@ -13,6 +13,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
+import com.tradingbot.ma3_network.Entity.PasswordResetToken;
+import com.tradingbot.ma3_network.Repository.PasswordResetTokenRepository;
+import com.tradingbot.ma3_network.Service.EmailService;
+import java.util.UUID;
 
 import java.util.List;
 import java.util.Map;
@@ -26,6 +30,8 @@ public class AdminController {
     private final UserRepository         userRepository;
     private final PasswordEncoder        passwordEncoder;
     private final AdminAnalyticsService  adminAnalyticsService;
+    private final PasswordResetTokenRepository tokenRepository;
+    private final EmailService emailService;
 
     // ── Analytics ─────────────────────────────────────────────────────
     // Return type changed from AnalyticsDashboardResponse to Map<String,Object>
@@ -46,16 +52,22 @@ public class AdminController {
     @Transactional
     public ResponseEntity<Sacco> onboardSacco(@RequestBody SaccoRequest request) {
 
-        // 1. Create the SACCO Manager account
         User manager = new User();
         manager.setFirstName(request.getManagerFirstName());
         manager.setLastName(request.getManagerLastName());
         manager.setEmail(request.getManagerEmail());
         manager.setPhoneNumber(request.getManagerPhone());
-        manager.setPasswordHash(passwordEncoder.encode("Default@123"));
+
+        // SECURED: Assign a random UUID as the password so it can't be guessed
+        manager.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString()));
         manager.setRole(Role.SACCO_MANAGER);
 
         User savedManager = userRepository.save(manager);
+
+        // SECURED: Generate token and fire the welcome email to the new manager!
+        String token = UUID.randomUUID().toString();
+        tokenRepository.save(new PasswordResetToken(token, savedManager));
+        emailService.sendPasswordSetupEmail(savedManager.getEmail(), token);
 
         Sacco sacco = new Sacco();
         sacco.setName(request.getSaccoName());

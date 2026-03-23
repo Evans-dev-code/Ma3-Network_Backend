@@ -16,6 +16,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.tradingbot.ma3_network.Entity.PasswordResetToken;
+import com.tradingbot.ma3_network.Repository.PasswordResetTokenRepository;
+import com.tradingbot.ma3_network.Service.EmailService;
+import java.util.UUID;
+
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -27,6 +32,9 @@ public class SaccoManagementService {
     private final VehicleRepository vehicleRepository;
     private final UserRepository    userRepository;
     private final PasswordEncoder   passwordEncoder;
+    private final PasswordResetTokenRepository tokenRepository;
+    private final EmailService emailService;
+
 
     // ── Register SACCO ────────────────────────────────────────────────────
     public Sacco registerSacco(Sacco sacco) {
@@ -206,7 +214,6 @@ public class SaccoManagementService {
                                       String rawPassword) {
         return userRepository.findByEmail(email)
                 .orElseGet(() -> {
-                    // Guard against duplicate phone number before attempting insert
                     if (phone != null && !phone.isBlank()
                             && userRepository.existsByPhoneNumber(phone)) {
                         throw new RuntimeException(
@@ -219,13 +226,18 @@ public class SaccoManagementService {
                     u.setLastName(lastName);
                     u.setEmail(email);
                     u.setPhoneNumber(phone);
-                    u.setPasswordHash(passwordEncoder.encode(
-                            rawPassword != null && !rawPassword.isBlank()
-                                    ? rawPassword
-                                    : "Default@123"
-                    ));
+
+                    // Secure dummy password instead of rawPassword or Default@123
+                    u.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString()));
                     u.setRole(Role.CREW);
-                    return userRepository.save(u);
+                    User savedUser = userRepository.save(u);
+
+                    // Send Setup Email
+                    String token = UUID.randomUUID().toString();
+                    tokenRepository.save(new PasswordResetToken(token, savedUser));
+                    emailService.sendPasswordSetupEmail(savedUser.getEmail(), token);
+
+                    return savedUser;
                 });
     }
 }

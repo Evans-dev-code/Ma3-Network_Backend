@@ -21,6 +21,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import com.tradingbot.ma3_network.Entity.PasswordResetToken;
+import com.tradingbot.ma3_network.Repository.PasswordResetTokenRepository;
+import com.tradingbot.ma3_network.Service.EmailService;
+import java.util.UUID;
+
 import java.math.BigDecimal;
 import java.security.Principal;
 import java.util.LinkedHashMap;
@@ -40,6 +45,8 @@ public class SaccoController {
     private final UserRepository         userRepository;
     private final PasswordEncoder        passwordEncoder;
     private final RouteRepository routeRepository;
+    private final PasswordResetTokenRepository tokenRepository;
+    private final EmailService emailService;
 
     // ── SACCO: Register (admin-facing) ────────────────────────────────────
     @PostMapping("/register")
@@ -140,6 +147,7 @@ public class SaccoController {
         }
 
         // 5 — Resolve or create driver
+        // 5 — Resolve or create driver
         User driver = userRepository.findByEmail(req.getDriverEmail())
                 .orElseGet(() -> {
                     User u = new User();
@@ -147,9 +155,16 @@ public class SaccoController {
                     u.setLastName(req.getDriverLastName());
                     u.setEmail(req.getDriverEmail());
                     u.setPhoneNumber(req.getDriverPhone());
-                    u.setPasswordHash(passwordEncoder.encode(req.getDriverPassword()));
+                    u.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString()));
                     u.setRole(Role.CREW);
-                    return userRepository.save(u);
+                    User savedDriver = userRepository.save(u);
+
+                    // Send Setup Email
+                    String token = UUID.randomUUID().toString();
+                    tokenRepository.save(new PasswordResetToken(token, savedDriver));
+                    emailService.sendPasswordSetupEmail(savedDriver.getEmail(), token);
+
+                    return savedDriver;
                 });
 
         // 6 — Conductor is optional
@@ -196,9 +211,16 @@ public class SaccoController {
                         u.setLastName(req.getConductorLastName());
                         u.setEmail(req.getConductorEmail());
                         u.setPhoneNumber(req.getConductorPhone());
-                        u.setPasswordHash(passwordEncoder.encode(req.getConductorPassword()));
+                        u.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString()));
                         u.setRole(Role.CREW);
-                        return userRepository.save(u);
+                        User savedConductor = userRepository.save(u);
+
+                        // Send Setup Email
+                        String token = UUID.randomUUID().toString();
+                        tokenRepository.save(new PasswordResetToken(token, savedConductor));
+                        emailService.sendPasswordSetupEmail(savedConductor.getEmail(), token);
+
+                        return savedConductor;
                     });
         }
 

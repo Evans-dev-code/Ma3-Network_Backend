@@ -16,7 +16,6 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.Arrays;
-import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -32,17 +31,24 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/auth/**", "/api/v1/payments/mpesa-callback", "/ws/**").permitAll()
+                        // 1. Open Endpoints (No Token Required)
+                        .requestMatchers(
+                                "/api/v1/auth/**",
+                                "/api/v1/payments/**", // 🔥 Matches all Safaricom M-Pesa webhooks
+                                "/ws/**"               // 🔥 Allows WebSocket handshake for Live Map
+                        ).permitAll()
+
+                        // 2. Role-Restricted Endpoints
                         .requestMatchers("/api/v1/admin/**").hasAuthority("SUPER_ADMIN")
                         .requestMatchers("/api/v1/sacco/**").hasAnyAuthority("SUPER_ADMIN", "SACCO_MANAGER")
                         .requestMatchers("/api/v1/owner/**").hasAuthority("OWNER")
                         .requestMatchers("/api/v1/crew/**").hasAuthority("CREW")
                         .requestMatchers("/api/v1/passenger/**").hasAuthority("PASSENGER")
-                        .requestMatchers("/api/v1/owner/subscription/**").hasAuthority("OWNER")
-                        .requestMatchers("/api/v1/user/profile").authenticated()
-                        .requestMatchers("/api/v1/user/password").authenticated()
-                        .requestMatchers("/api/v1/user/documents").authenticated()
-                        .requestMatchers("/api/v1/user/documents/**").authenticated()
+
+                        // 3. Authenticated Endpoints (Any valid logged-in user)
+                        .requestMatchers("/api/v1/user/**").authenticated()
+
+                        // 4. Catch-all safety net
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

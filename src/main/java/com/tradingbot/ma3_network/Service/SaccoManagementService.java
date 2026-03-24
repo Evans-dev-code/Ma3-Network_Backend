@@ -50,10 +50,6 @@ public class SaccoManagementService {
     }
 
     // ── Register vehicle with crew ────────────────────────────────────────
-    // NOTE: This method is kept for backward compatibility but the
-    // SaccoController.registerVehicleWithCrew() handles all registration
-    // inline with full validation. This service method is used when called
-    // programmatically from other services if needed.
     @Transactional
     public Vehicle registerVehicleWithCrew(VehicleRegistrationRequest req,
                                            String managerEmail) {
@@ -76,12 +72,32 @@ public class SaccoManagementService {
                 .orElseThrow(() -> new RuntimeException(
                         "No SACCO found for manager: " + managerEmail));
 
+        // Synced: Find, Upgrade, or Create Owner
         User owner = userRepository.findByEmail(req.getOwnerEmail())
-                .orElseThrow(() -> new RuntimeException(
-                        "Owner with email " + req.getOwnerEmail()
-                                + " not found. The owner must have a registered account."));
+                .map(existingUser -> {
+                    if (existingUser.getRole() == Role.PASSENGER) {
+                        existingUser.setRole(Role.OWNER);
+                        return userRepository.save(existingUser);
+                    }
+                    return existingUser;
+                })
+                .orElseGet(() -> {
+                    User u = new User();
+                    u.setFirstName("Vehicle");
+                    u.setLastName("Owner");
+                    u.setEmail(req.getOwnerEmail());
+                    u.setPhoneNumber(null);
+                    u.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString()));
+                    u.setRole(Role.OWNER);
+                    User savedOwner = userRepository.save(u);
 
-        // No more password variable passed in!
+                    String token = UUID.randomUUID().toString();
+                    tokenRepository.save(new PasswordResetToken(token, savedOwner));
+                    emailService.sendPasswordSetupEmail(savedOwner.getEmail(), token);
+
+                    return savedOwner;
+                });
+
         User driver = findOrCreateCrewUser(
                 req.getDriverFirstName(),
                 req.getDriverLastName(),
@@ -96,7 +112,6 @@ public class SaccoManagementService {
             if (req.getConductorLastName() == null || req.getConductorLastName().isBlank())
                 throw new RuntimeException("Conductor last name is required.");
 
-            // No more password variable passed in!
             conductor = findOrCreateCrewUser(
                     req.getConductorFirstName(),
                     req.getConductorLastName(),
@@ -200,13 +215,19 @@ public class SaccoManagementService {
     // ── Private helpers ───────────────────────────────────────────────────
 
     /**
-     * Resolves an existing CREW user by email, or creates a new one.
-     * Phone uniqueness is checked before insert to give a clean error
-     * instead of a raw SQL constraint violation.
+     * Synced: Resolves an existing user by email (upgrading PASSENGER to CREW),
+     * or creates a new CREW user.
      */
     private User findOrCreateCrewUser(String firstName, String lastName,
                                       String email, String phone) {
         return userRepository.findByEmail(email)
+                .map(existingUser -> {
+                    if (existingUser.getRole() == Role.PASSENGER) {
+                        existingUser.setRole(Role.CREW);
+                        return userRepository.save(existingUser);
+                    }
+                    return existingUser;
+                })
                 .orElseGet(() -> {
                     if (phone != null && !phone.isBlank()
                             && userRepository.existsByPhoneNumber(phone)) {
@@ -221,12 +242,10 @@ public class SaccoManagementService {
                     u.setEmail(email);
                     u.setPhoneNumber(phone);
 
-                    // Secure dummy password generated here
                     u.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString()));
                     u.setRole(Role.CREW);
                     User savedUser = userRepository.save(u);
 
-                    // Send Setup Email
                     String token = UUID.randomUUID().toString();
                     tokenRepository.save(new PasswordResetToken(token, savedUser));
                     emailService.sendPasswordSetupEmail(savedUser.getEmail(), token);

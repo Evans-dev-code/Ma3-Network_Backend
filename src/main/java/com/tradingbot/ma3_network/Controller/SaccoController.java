@@ -119,15 +119,34 @@ public class SaccoController {
                             "Plate number " + req.getPlateNumber() + " is already registered."));
         }
 
-        // 3 — Resolve owner (must already have an account)
+        // 3 — Resolve or Create Owner
         User owner = userRepository.findByEmail(req.getOwnerEmail())
-                .orElse(null);
-        if (owner == null) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("error",
-                            "Owner with email " + req.getOwnerEmail()
-                                    + " not found. The owner must have a registered account first."));
-        }
+                .map(existingUser -> {
+                    // Upgrade role if they were just a passenger
+                    if (existingUser.getRole() == Role.PASSENGER) {
+                        existingUser.setRole(Role.OWNER);
+                        return userRepository.save(existingUser);
+                    }
+                    return existingUser;
+                })
+                .orElseGet(() -> {
+                    User u = new User();
+                    // Since DTO only provides ownerEmail, use placeholder names
+                    u.setFirstName("Vehicle");
+                    u.setLastName("Owner");
+                    u.setEmail(req.getOwnerEmail());
+                    u.setPhoneNumber(null); // Keep null to avoid unique constraint errors
+                    u.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString()));
+                    u.setRole(Role.OWNER);
+                    User savedOwner = userRepository.save(u);
+
+                    // Send Setup Email
+                    String token = UUID.randomUUID().toString();
+                    tokenRepository.save(new PasswordResetToken(token, savedOwner));
+                    emailService.sendPasswordSetupEmail(savedOwner.getEmail(), token);
+
+                    return savedOwner;
+                });
 
         // 4 — Driver must not already be assigned to another vehicle
         if (vehicleRepository.findByDriverEmail(req.getDriverEmail()).isPresent()) {
@@ -148,6 +167,14 @@ public class SaccoController {
 
         // 5 — Resolve or create driver
         User driver = userRepository.findByEmail(req.getDriverEmail())
+                .map(existingUser -> {
+                    // Upgrade role if they were just a passenger
+                    if (existingUser.getRole() == Role.PASSENGER) {
+                        existingUser.setRole(Role.CREW);
+                        return userRepository.save(existingUser);
+                    }
+                    return existingUser;
+                })
                 .orElseGet(() -> {
                     User u = new User();
                     u.setFirstName(req.getDriverFirstName());
@@ -200,6 +227,14 @@ public class SaccoController {
             }
 
             conductor = userRepository.findByEmail(req.getConductorEmail())
+                    .map(existingUser -> {
+                        // Upgrade role if they were just a passenger
+                        if (existingUser.getRole() == Role.PASSENGER) {
+                            existingUser.setRole(Role.CREW);
+                            return userRepository.save(existingUser);
+                        }
+                        return existingUser;
+                    })
                     .orElseGet(() -> {
                         User u = new User();
                         u.setFirstName(req.getConductorFirstName());

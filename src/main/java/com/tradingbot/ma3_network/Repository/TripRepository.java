@@ -31,8 +31,6 @@ public interface TripRepository extends JpaRepository<Trip, Long> {
             LocalDateTime start, LocalDateTime end);
 
     // ── Analytics: Revenue & Profit ───────────────────────────────────────
-    // NOTE: always bind status as a :param — never use string literals like
-    //       'COMPLETED' in JPQL; Hibernate enum comparison is unreliable that way.
 
     @Query("""
             SELECT COALESCE(SUM(t.totalRevenue - t.fuelExpense - t.otherExpenses), 0)
@@ -72,6 +70,20 @@ public interface TripRepository extends JpaRepository<Trip, Long> {
             @Param("status")     TripStatus status,
             @Param("start")      LocalDateTime start,
             @Param("end")        LocalDateTime end);
+
+    // NEW: Gets raw revenue for a single vehicle (Used for per-vehicle profit math)
+    @Query("""
+            SELECT COALESCE(SUM(t.totalRevenue), 0)
+            FROM Trip t
+            WHERE t.vehicle.id = :vehicleId
+              AND t.status = :status
+              AND t.startTime BETWEEN :start AND :end
+            """)
+    BigDecimal getDailyGrossRevenueForVehicle(
+            @Param("vehicleId") Long vehicleId,
+            @Param("status")    TripStatus status,
+            @Param("start")     LocalDateTime start,
+            @Param("end")       LocalDateTime end);
 
     @Query("""
             SELECT COALESCE(SUM(t.fuelExpense), 0)

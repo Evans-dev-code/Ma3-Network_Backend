@@ -5,6 +5,7 @@ import com.tradingbot.ma3_network.Dto.AnalyticsDashboardResponse.*;
 import com.tradingbot.ma3_network.Entity.Vehicle;
 import com.tradingbot.ma3_network.Enum.TripStatus;
 import com.tradingbot.ma3_network.Enum.VehicleStatus;
+import com.tradingbot.ma3_network.Repository.ExpenseRepository;
 import com.tradingbot.ma3_network.Repository.MaintenanceRepository;
 import com.tradingbot.ma3_network.Repository.TripRepository;
 import com.tradingbot.ma3_network.Repository.VehicleRepository;
@@ -26,19 +27,16 @@ public class OwnerAnalyticsService {
     private final VehicleRepository     vehicleRepository;
     private final TripRepository        tripRepository;
     private final MaintenanceRepository maintenanceRepository;
+    // 🚨 Injected the Expense Repository to fetch crew logs!
+    private final ExpenseRepository     expenseRepository;
 
-    // ══════════════════════════════════════════════════════════════════════
-    //  PRIMARY: Full Dashboard
-    //  @Transactional — prevents LazyInitializationException when the
-    //  service navigates lazy relations (v.getOwner(), v.getDriver() etc.)
-    // ══════════════════════════════════════════════════════════════════════
     @Transactional(readOnly = true)
     public AnalyticsDashboardResponse getDashboardAnalytics(
             String ownerEmail,
             LocalDateTime rangeStart,
             LocalDateTime rangeEnd) {
 
-        // ── 1. Fetch fleet ────────────────────────────────────────────────
+        // ── 1. Fetch fleet
         List<Vehicle> myVehicles = vehicleRepository.findByOwnerEmail(ownerEmail);
         if (myVehicles.isEmpty()) {
             return buildEmptyResponse();
@@ -48,11 +46,10 @@ public class OwnerAnalyticsService {
                 .map(Vehicle::getId)
                 .collect(Collectors.toList());
 
-        // ── 2. Today's window ─────────────────────────────────────────────
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
         LocalDateTime todayEnd   = LocalDate.now().atTime(LocalTime.MAX);
 
-        // ── 3. Fleet summary ──────────────────────────────────────────────
+        // ── 2. Fleet summary
         long activeCount = myVehicles.stream()
                 .filter(v -> v.getStatus() == VehicleStatus.ACTIVE)
                 .count();
@@ -60,64 +57,51 @@ public class OwnerAnalyticsService {
         long completedTrips = tripRepository.countByVehicleIdInAndStatus(
                 vehicleIds, TripStatus.COMPLETED);
 
-        // ── 4. Period financials (DB-level, enum params) ───────────────────
+        // ── 3. NEW MATH: Decoupled Revenue vs Expenses ────────────────────
+
+        // Gross comes strictly from TRIPS
         BigDecimal totalGrossRevenue = getOrZero(
-                tripRepository.getFleetGrossRevenue(
-                        vehicleIds, TripStatus.COMPLETED, rangeStart, rangeEnd));
+                tripRepository.getFleetGrossRevenue(vehicleIds, TripStatus.COMPLETED, rangeStart, rangeEnd));
 
-        BigDecimal totalNetProfit = getOrZero(
-                tripRepository.getFleetNetProfit(
-                        vehicleIds, TripStatus.COMPLETED, rangeStart, rangeEnd));
-
+        // Expenses come strictly from EXPENSE LOGGER & MAINTENANCE
         BigDecimal totalFuel = getOrZero(
-                tripRepository.getFleetTotalFuelExpense(
-                        vehicleIds, TripStatus.COMPLETED, rangeStart, rangeEnd));
+                expenseRepository.getFleetFuelExpense(vehicleIds, rangeStart, rangeEnd));
 
         BigDecimal totalOther = getOrZero(
-                tripRepository.getFleetTotalOtherExpenses(
-                        vehicleIds, TripStatus.COMPLETED, rangeStart, rangeEnd));
+                expenseRepository.getFleetOtherExpenses(vehicleIds, rangeStart, rangeEnd));
 
         BigDecimal totalMaintenance = getOrZero(
-                maintenanceRepository.getTotalMaintenanceCost(
-                        vehicleIds, rangeStart, rangeEnd));
+                maintenanceRepository.getTotalMaintenanceCost(vehicleIds, rangeStart, rangeEnd));
 
+        // Calculate Totals and Net Profit dynamically
         BigDecimal totalExpenses = totalFuel.add(totalOther).add(totalMaintenance);
+        BigDecimal totalNetProfit = totalGrossRevenue.subtract(totalExpenses);
 
-        // ── 5. Today's net profit ─────────────────────────────────────────
-        BigDecimal todayNetProfit = getOrZero(
-                tripRepository.getFleetNetProfit(
-                        vehicleIds, TripStatus.COMPLETED, todayStart, todayEnd));
+        // ── 4. Today's net profit (Dynamic Math) ──────────────────────────
+        BigDecimal todayGross = getOrZero(
+                tripRepository.getFleetGrossRevenue(vehicleIds, TripStatus.COMPLETED, todayStart, todayEnd));
+        BigDecimal todayExpenses = getOrZero(
+                expenseRepository.getFleetTotalExpenses(vehicleIds, todayStart, todayEnd));
+        BigDecimal todayNetProfit = todayGross.subtract(todayExpenses);
 
-        // ── 6. Period trips (for in-memory chart builders) ────────────────
-        //    Use the Spring Data combined query — no manual Java stream filter
-        //    needed; this avoids the null-startTime trap.
+        // ── 5. Period trips (for in-memory chart builders)
         List<com.tradingbot.ma3_network.Entity.Trip> periodTrips =
                 tripRepository.findByVehicleIdInAndStatusAndStartTimeBetween(
                         vehicleIds, TripStatus.COMPLETED, rangeStart, rangeEnd);
 
-        // ── 7. Per-vehicle performance ────────────────────────────────────
+        // ── 6. Per-vehicle performance
         List<VehiclePerformance> vehiclePerformances =
                 buildVehiclePerformances(myVehicles, todayStart, todayEnd);
 
-        // ── 8. Charts ─────────────────────────────────────────────────────
-        List<ChartData> expenseBreakdown =
-                buildExpenseBreakdown(totalFuel, totalOther, totalMaintenance);
+        // ── 7. Charts
+        List<ChartData> expenseBreakdown = buildExpenseBreakdown(totalFuel, totalOther, totalMaintenance);
+        List<ChartData> maintenanceCostByType = buildMaintenanceCostByType(vehicleIds, rangeStart, rangeEnd);
+        List<ChartData> routePerformance = buildRoutePerformance(periodTrips);
+        List<ChartSeriesData> weeklyTrend = buildWeeklyTrend(vehicleIds, rangeStart, rangeEnd);
 
-        List<ChartData> maintenanceCostByType =
-                buildMaintenanceCostByType(vehicleIds, rangeStart, rangeEnd);
-
-        List<ChartData> routePerformance =
-                buildRoutePerformance(periodTrips);
-
-        List<ChartSeriesData> weeklyTrend =
-                buildWeeklyTrend(vehicleIds, rangeStart, rangeEnd);
-
-        // ── 9. Alerts ─────────────────────────────────────────────────────
-        List<MaintenanceAlert> maintenanceAlerts =
-                buildMaintenanceAlerts(myVehicles);
-
-        List<ComplianceAlert> complianceAlerts =
-                buildComplianceAlerts(ownerEmail);
+        // ── 8. Alerts
+        List<MaintenanceAlert> maintenanceAlerts = buildMaintenanceAlerts(myVehicles);
+        List<ComplianceAlert> complianceAlerts = buildComplianceAlerts(ownerEmail);
 
         return AnalyticsDashboardResponse.builder()
                 .totalVehicles((int) myVehicles.size())
@@ -140,9 +124,6 @@ public class OwnerAnalyticsService {
                 .build();
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    //  SECONDARY: Alerts only
-    // ══════════════════════════════════════════════════════════════════════
     @Transactional(readOnly = true)
     public AlertSummary getAlertSummary(String ownerEmail) {
         List<Vehicle> myVehicles = vehicleRepository.findByOwnerEmail(ownerEmail);
@@ -162,9 +143,13 @@ public class OwnerAnalyticsService {
             LocalDateTime todayEnd) {
 
         return vehicles.stream().map(v -> {
-            BigDecimal todayProfit = getOrZero(
-                    tripRepository.getDailyNetProfitForVehicle(
-                            v.getId(), TripStatus.COMPLETED, todayStart, todayEnd));
+            // NEW MATH: Calculate individual vehicle profit correctly
+            BigDecimal vTodayRevenue = getOrZero(
+                    tripRepository.getDailyGrossRevenueForVehicle(v.getId(), TripStatus.COMPLETED, todayStart, todayEnd));
+            BigDecimal vTodayExpenses = getOrZero(
+                    expenseRepository.getDailyTotalForVehicle(v.getId(), todayStart, todayEnd));
+
+            BigDecimal todayProfit = vTodayRevenue.subtract(vTodayExpenses);
 
             BigDecimal target = v.getDailyTarget() != null
                     ? v.getDailyTarget()
@@ -311,9 +296,6 @@ public class OwnerAnalyticsService {
         );
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    //  UTILITY
-    // ══════════════════════════════════════════════════════════════════════
     private BigDecimal getOrZero(BigDecimal value) {
         return value != null ? value : BigDecimal.ZERO;
     }

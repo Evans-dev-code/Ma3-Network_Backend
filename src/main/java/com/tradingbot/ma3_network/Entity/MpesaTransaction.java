@@ -23,9 +23,10 @@ public class MpesaTransaction {
     @Column(nullable = false)
     private BigDecimal amount;
 
+    // 🚨 FIXED: Now linked to User! The subscription is created later.
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "subscription_id")
-    private Subscription subscription;
+    @JoinColumn(name = "user_id")
+    private User user;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

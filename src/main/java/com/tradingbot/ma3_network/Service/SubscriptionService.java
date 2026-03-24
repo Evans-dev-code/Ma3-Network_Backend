@@ -26,7 +26,13 @@ public class SubscriptionService {
     // KSh 300 per vehicle per month
     private static final long COST_PER_VEHICLE = 300L;
 
-    // ── Check if owner has an active subscription ─────────────────────────
+    public long calculateMonthlyCost(String ownerEmail) {
+        long vehicleCount = vehicleRepository.findByOwnerEmail(ownerEmail).size();
+        // If they have 0 vehicles, charge for at least 1 so they can start adding them
+        if (vehicleCount == 0) vehicleCount = 1;
+        return vehicleCount * COST_PER_VEHICLE;
+    }
+
     public boolean isSubscriptionActive(String ownerEmail) {
         User user = userRepository.findByEmail(ownerEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -37,14 +43,13 @@ public class SubscriptionService {
                 .orElse(false);
     }
 
-    // ── Get full subscription status for the dashboard ────────────────────
     @Transactional(readOnly = true)
     public Map<String, Object> getSubscriptionStatus(String ownerEmail) {
         User user = userRepository.findByEmail(ownerEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         long vehicleCount = vehicleRepository.findByOwnerEmail(ownerEmail).size();
-        long monthlyCost  = vehicleCount * COST_PER_VEHICLE;
+        long monthlyCost  = calculateMonthlyCost(ownerEmail);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("vehicleCount",  vehicleCount);
@@ -54,8 +59,7 @@ public class SubscriptionService {
         subscriptionRepository.findByUserIdAndIsActiveTrue(user.getId())
                 .ifPresentOrElse(sub -> {
                     boolean notExpired = sub.getEndDate().isAfter(LocalDateTime.now());
-                    long daysLeft = ChronoUnit.DAYS.between(
-                            LocalDateTime.now(), sub.getEndDate());
+                    long daysLeft = ChronoUnit.DAYS.between(LocalDateTime.now(), sub.getEndDate());
 
                     result.put("active",       notExpired);
                     result.put("status",       notExpired ? "ACTIVE" : "EXPIRED");
@@ -75,20 +79,15 @@ public class SubscriptionService {
         return result;
     }
 
-    // ── Activate / renew subscription after M-Pesa payment ───────────────
+    // 🚨 Now strictly called ONLY by the M-Pesa Webhook!
     @Transactional
-    public Map<String, Object> activateSubscription(String ownerEmail) {
-        User user = userRepository.findByEmail(ownerEmail)
-                .orElseThrow(() -> new RuntimeException("User not found"));
-
-        // Deactivate any existing subscription
+    public void activateSubscriptionSafely(User user) {
         subscriptionRepository.findByUserIdAndIsActiveTrue(user.getId())
                 .ifPresent(existing -> {
                     existing.setActive(false);
                     subscriptionRepository.save(existing);
                 });
 
-        // Create new 30-day subscription
         Subscription sub = new Subscription();
         sub.setUser(user);
         sub.setTier(SubscriptionTier.PREMIUM);
@@ -96,18 +95,5 @@ public class SubscriptionService {
         sub.setEndDate(LocalDateTime.now().plusDays(30));
         sub.setActive(true);
         subscriptionRepository.save(sub);
-
-        long vehicleCount = vehicleRepository.findByOwnerEmail(ownerEmail).size();
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("active",          true);
-        result.put("status",          "ACTIVE");
-        result.put("tier",            "PREMIUM");
-        result.put("endDate",         sub.getEndDate().toString());
-        result.put("daysRemaining",   30);
-        result.put("vehicleCount",    vehicleCount);
-        result.put("totalMonthlyCost", vehicleCount * COST_PER_VEHICLE);
-        result.put("message",         "Subscription activated for 30 days");
-        return result;
     }
 }

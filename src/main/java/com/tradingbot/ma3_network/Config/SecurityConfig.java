@@ -34,8 +34,9 @@ public class SecurityConfig {
                         // 1. Open Endpoints (No Token Required)
                         .requestMatchers(
                                 "/api/v1/auth/**",
-                                "/api/v1/payments/**", // 🔥 Matches all Safaricom M-Pesa webhooks
-                                "/ws/**"               // 🔥 Allows WebSocket handshake for Live Map
+                                "/api/v1/payments/**",
+                                "/ws/**",
+                                "/error"
                         ).permitAll()
 
                         // 2. Role-Restricted Endpoints

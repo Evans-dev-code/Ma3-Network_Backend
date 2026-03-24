@@ -81,12 +81,12 @@ public class SaccoManagementService {
                         "Owner with email " + req.getOwnerEmail()
                                 + " not found. The owner must have a registered account."));
 
+        // No more password variable passed in!
         User driver = findOrCreateCrewUser(
                 req.getDriverFirstName(),
                 req.getDriverLastName(),
                 req.getDriverEmail(),
-                req.getDriverPhone(),
-                req.getDriverPassword()
+                req.getDriverPhone()
         );
 
         User conductor = null;
@@ -95,15 +95,13 @@ public class SaccoManagementService {
                 throw new RuntimeException("Conductor first name is required.");
             if (req.getConductorLastName() == null || req.getConductorLastName().isBlank())
                 throw new RuntimeException("Conductor last name is required.");
-            if (req.getConductorPassword() == null || req.getConductorPassword().isBlank())
-                throw new RuntimeException("Conductor password is required.");
 
+            // No more password variable passed in!
             conductor = findOrCreateCrewUser(
                     req.getConductorFirstName(),
                     req.getConductorLastName(),
                     req.getConductorEmail(),
-                    req.getConductorPhone(),
-                    req.getConductorPassword()
+                    req.getConductorPhone()
             );
         }
 
@@ -163,8 +161,7 @@ public class SaccoManagementService {
                 request.getDriverFirstName(),
                 request.getDriverLastName(),
                 request.getDriverEmail(),
-                request.getDriverPhone(),
-                null  // no password change on reassign
+                request.getDriverPhone()
         );
 
         User newConductor = null;
@@ -173,8 +170,7 @@ public class SaccoManagementService {
                     request.getConductorFirstName(),
                     request.getConductorLastName(),
                     request.getConductorEmail(),
-                    request.getConductorPhone(),
-                    null
+                    request.getConductorPhone()
             );
         }
 
@@ -207,11 +203,9 @@ public class SaccoManagementService {
      * Resolves an existing CREW user by email, or creates a new one.
      * Phone uniqueness is checked before insert to give a clean error
      * instead of a raw SQL constraint violation.
-     * Password is only set on creation — never overwritten on existing users.
      */
     private User findOrCreateCrewUser(String firstName, String lastName,
-                                      String email, String phone,
-                                      String rawPassword) {
+                                      String email, String phone) {
         return userRepository.findByEmail(email)
                 .orElseGet(() -> {
                     if (phone != null && !phone.isBlank()
@@ -227,7 +221,7 @@ public class SaccoManagementService {
                     u.setEmail(email);
                     u.setPhoneNumber(phone);
 
-                    // Secure dummy password instead of rawPassword or Default@123
+                    // Secure dummy password generated here
                     u.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString()));
                     u.setRole(Role.CREW);
                     User savedUser = userRepository.save(u);

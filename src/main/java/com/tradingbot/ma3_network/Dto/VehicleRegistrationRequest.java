@@ -4,7 +4,6 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import lombok.Data;
 
@@ -24,12 +23,9 @@ public class VehicleRegistrationRequest {
     @Min(value = 1, message = "Capacity must be at least 1")
     private int capacity;
 
-    // dailyTarget defaults to 0 if omitted — controller applies 8000 fallback.
-    // @PositiveOrZero allows 0 (meaning "not set yet"); controller fills the default.
     @PositiveOrZero(message = "Daily target must be zero or a positive number")
     private long dailyTarget;
 
-    // A brand-new vehicle starts at 0 km — @Positive would incorrectly reject that.
     @PositiveOrZero(message = "Current mileage must be zero or a positive number")
     private long currentMileage;
 
@@ -64,25 +60,22 @@ public class VehicleRegistrationRequest {
     @Pattern(regexp = "^[0-9]{10,12}$", message = "Enter a valid driver phone number")
     private String driverPhone;
 
-    @NotBlank(message = "Driver password is required")
+    // No annotations here! We just need the variable to exist so the code compiles.
     private String driverPassword;
 
     // ── Conductor (optional) ──────────────────────────────────────────────
-    // No @NotBlank / @NotNull on any conductor field.
-    // If conductorEmail is absent the vehicle is saved with conductor = null.
-    // The SACCO can assign one later via PATCH /vehicle/{id}/conductor.
 
     private String conductorFirstName;
     private String conductorLastName;
     private String conductorEmail;
 
-    // Allows empty string (no conductor) OR a valid 10–12 digit number.
     @Pattern(
             regexp  = "^$|^[0-9]{10,12}$",
             message = "Enter a valid conductor phone number"
     )
     private String conductorPhone;
 
+    // No annotations here either!
     private String conductorPassword;
 
     // ── Helper ────────────────────────────────────────────────────────────

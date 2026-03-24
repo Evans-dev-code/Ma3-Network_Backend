@@ -147,7 +147,6 @@ public class SaccoController {
         }
 
         // 5 — Resolve or create driver
-        // 5 — Resolve or create driver
         User driver = userRepository.findByEmail(req.getDriverEmail())
                 .orElseGet(() -> {
                     User u = new User();
@@ -187,10 +186,6 @@ public class SaccoController {
             if (req.getConductorLastName() == null || req.getConductorLastName().isBlank()) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "Conductor last name is required."));
-            }
-            if (req.getConductorPassword() == null || req.getConductorPassword().isBlank()) {
-                return ResponseEntity.badRequest()
-                        .body(Map.of("error", "Conductor password is required."));
             }
 
             // 6c — Conductor phone must be unique (only when creating a new user)
